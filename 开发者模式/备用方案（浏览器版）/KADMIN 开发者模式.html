@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>KADMIN 开发者模式 · 外挂面板</title>
+<style>
+  :root{ --bg:#0e1116; --pan:#161b22; --line:#2b333d; --txt:#e6edf3; --dim:#8b949e; --acc:#d4a24a; --ok:#4ec97a; --bad:#ff6a5a; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--bg); color:var(--txt); font:13px/1.5 "Microsoft YaHei",system-ui,sans-serif; }
+  header{ position:sticky; top:0; z-index:5; background:linear-gradient(180deg,#1b2129,#161b22); border-bottom:1px solid var(--line); padding:10px 14px; }
+  h1{ margin:0 0 6px; font-size:15px; letter-spacing:1px; color:var(--acc); }
+  .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  .pill{ padding:2px 8px; border:1px solid var(--line); border-radius:99px; color:var(--dim); font-size:12px; }
+  .pill.on{ color:#0b0f14; background:var(--ok); border-color:var(--ok); font-weight:bold; }
+  .pill.off{ color:#fff; background:#5a3030; border-color:#7a3b3b; }
+  main{ display:grid; grid-template-columns: minmax(280px,1fr) minmax(300px,1.1fr); gap:12px; padding:12px; }
+  /* 窄窗口/小窗（外挂式小面板）：单列 + 收紧留白，360px 宽也能用 */
+  @media (max-width:900px){ main{ grid-template-columns:1fr; } }
+  @media (max-width:520px){
+    header{ padding:8px 10px; }
+    h1{ font-size:13px; }
+    main{ gap:8px; padding:8px; }
+    section{ padding:8px 9px; }
+    .cards{ max-height:34vh; }
+    #log{ height:22vh; }
+    .card{ padding:5px 6px; }
+    .pill{ font-size:11px; padding:1px 6px; }
+    button{ padding:4px 8px; font-size:12px; }
+  }
+  section{ background:var(--pan); border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
+  section h2{ margin:0 0 8px; font-size:13px; color:var(--acc); letter-spacing:1px; }
+  input[type=text],select{ background:#0b0f14; color:var(--txt); border:1px solid var(--line); border-radius:6px; padding:6px 8px; font:inherit; }
+  button{ background:#232b35; color:var(--txt); border:1px solid var(--line); border-radius:6px; padding:5px 10px; font:inherit; cursor:pointer; }
+  button:hover{ border-color:var(--acc); color:var(--acc); }
+  button.primary{ background:#2d2612; border-color:var(--acc); color:var(--acc); font-weight:bold; }
+  button.danger{ border-color:#7a3b3b; color:#ffb0a6; }
+  button:disabled{ opacity:.45; cursor:not-allowed; }
+  .cards{ max-height:46vh; overflow:auto; border:1px solid var(--line); border-radius:8px; margin-top:8px; }
+  .card{ display:grid; grid-template-columns:1fr auto; gap:6px; padding:6px 8px; border-bottom:1px solid #1e242c; cursor:pointer; }
+  .card:last-child{ border-bottom:0; }
+  .card:hover{ background:#1d242d; }
+  .card.sel{ background:#2b2413; outline:1px solid var(--acc); }
+  .card .nm{ font-weight:bold; }
+  .card .sub{ color:var(--dim); font-size:11px; }
+  .tag{ font-size:11px; padding:1px 6px; border-radius:99px; border:1px solid var(--line); color:var(--dim); }
+  .tag.normal{ color:#9fd0ff; border-color:#2b4a6b; }
+  .tag.derived{ color:#ffd479; border-color:#5d4a1c; }
+  .tag.jm{ color:#ff9dd0; border-color:#6b2b56; }
+  .tag.veteran{ color:#9dffb0; border-color:#2b6b3f; }
+  #log{ height:26vh; overflow:auto; background:#0b0f14; border:1px solid var(--line); border-radius:8px; padding:8px; font:12px/1.6 Consolas,monospace; color:#b9c4cf; white-space:pre-wrap; }
+  .kv{ color:var(--dim); }
+  .kv b{ color:var(--txt); font-weight:normal; }
+  .hint{ color:var(--dim); font-size:12px; margin-top:6px; }
+  label.sw{ display:flex; align-items:center; gap:6px; margin:4px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>KADMIN 开发者模式 · 外挂面板</h1>
+  <div class="row">
+    <span id="conn" class="pill off">未连接</span>
+    <span id="build" class="pill">—</span>
+    <span id="turn" class="pill">回合 —</span>
+    <span id="hpP" class="pill">我方 —</span>
+    <span id="hpA" class="pill">敌方 —</span>
+    <span id="kr" class="pill">指挥点 —</span>
+    <span class="pill" id="flagsPill">开关 —</span>
+    <button id="btnRefresh">刷新状态</button>
+  </div>
+</header>
+
+<main>
+  <section>
+    <h2>① 卡牌操作</h2>
+    <div class="row">
+      <input type="text" id="q" placeholder="搜卡名 / id…（如 7075铝、SUPERMAN、轻步兵）" style="flex:1">
+      <select id="grp">
+        <option value="all">全部</option>
+        <option value="normal">正常卡池</option>
+        <option value="derived">衍生卡</option>
+        <option value="jm">JM（Boss 专用）</option>
+        <option value="veteran">老兵形态</option>
+      </select>
+    </div>
+    <div class="cards" id="cards"><div class="card"><div class="col"><div class="nm">等待连接…</div><div class="sub">先在 KADMIN 里开着游戏，再点「刷新状态」</div></div></div></div>
+    <div class="row" style="margin-top:8px">
+      <button class="primary" id="btnHand" disabled>加入手牌</button>
+      <button id="btnBoard" disabled>加入战场</button>
+      <button id="btnDeck" disabled>置于卡组顶</button>
+      <span class="kv" id="selInfo">未选择卡牌</span>
+    </div>
+    <div class="hint">战场默认放进你的支援战线（底线最左空位），满了自动上前线。</div>
+  </section>
+
+  <section>
+    <h2>② 作弊开关</h2>
+    <label class="sw"><input type="checkbox" id="cbKredit"> 无限指挥点（每回合顶到 99，花掉立刻补回）</label>
+    <label class="sw"><input type="checkbox" id="cbImmuneP"> 我方总部免疫伤害</label>
+    <label class="sw"><input type="checkbox" id="cbImmuneA"> 敌方总部免疫伤害</label>
+    <div class="row" style="margin-top:8px">
+      <button id="btnSkipAi">跳过 AI 下个回合</button>
+      <button id="btnHeal">双方总部回满</button>
+      <button class="danger" id="btnWin">直接获胜</button>
+    </div>
+    <h2 style="margin-top:14px">③ 日志</h2>
+    <div id="log">（等待指令…）</div>
+    <div class="hint">本面板与 KADMIN 通过浏览器本地存储通信：同一个浏览器里开着 KADMIN 即可，无需任何服务器。</div>
+  </section>
+</main>
+
+<script>
+(function(){
+  const KEY_ON='KADMIN_DEV_ON', KEY_CMD='KADMIN_DEV_CMD', KEY_ACK='KADMIN_DEV_ACK', KEY_CARDS='KADMIN_DEV_CARDS', CH='kadmin-dev';
+  let id = 0, ch = null, cards = [], sel = null, pending = new Map(), lastAckAt = 0, cardsAt = 0;
+  try{ if(typeof BroadcastChannel==='function') ch = new BroadcastChannel(CH); }catch(e){ ch = null; }
+  const $ = s => document.querySelector(s);
+  const log = m => { const el=$('#log'); if(!el) return; el.textContent = ('[' + new Date().toLocaleTimeString() + '] ' + m + '\n' + el.textContent).slice(0, 20000); };
+  // 任何脚本异常都记进日志，不静默炸页面
+  window.onerror = (msg, src, line) => { try{ log('⚠ 脚本异常：' + msg + ' @' + line); }catch(e){} };
+
+  try{ localStorage.setItem(KEY_ON, '1'); }catch(e){ log('⚠ 无法写入本地存储：' + e.message + '（请确认浏览器允许 file:// 页面使用存储）'); }
+
+  function send(cmd, args, cb, quiet){
+    id++;
+    const p = { id:id, cmd:cmd, args:args||{} };
+    pending.set(id, { cmd:cmd, cb:cb, quiet:!!quiet, at:Date.now() });
+    try{ localStorage.setItem(KEY_CMD, JSON.stringify(p)); }catch(e){ log('⚠ 发送失败：' + e.message); return; }
+    try{ if(ch) ch.postMessage({ type:'cmd', payload:p }); }catch(e){}
+    setTimeout(()=>{ if(pending.has(id)){ pending.delete(id); if(!quiet){ log('… ' + cmd + ' 无响应（KADMIN 没在运行 / 未加载开发者桥）'); setConn(false); } } }, 2500);
+  }
+  function setConn(on){
+    const el = $('#conn');
+    el.className = 'pill ' + (on ? 'on' : 'off');
+    el.textContent = on ? '已连接 KADMIN' : '未连接';
+  }
+  const seenAck = new Set();
+  function onAck(payload){
+    if(!payload || seenAck.has(payload.id)) return;     // 同一条回包只处理一次（轮询/事件可能重复送达）
+    seenAck.add(payload.id);
+    if(seenAck.size > 400) seenAck.clear();
+    lastAckAt = Date.now();
+    setConn(true);
+    const p = pending.get(payload.id);
+    if(p) pending.delete(payload.id);
+    if(payload.build) $('#build').textContent = '构架 ' + payload.build;
+    if(payload.msg && !(p && p.quiet)) log((payload.ok ? '✔ ' : '✖ ') + payload.msg);
+    if(p && p.cb) { try{ p.cb(payload); }catch(e){ log('处理回包异常：' + e.message); } }
+    if(payload.msg && payload.ok && /卡牌索引/.test(payload.msg)) loadCards();   // 卡表在独立键里，按需读
+    else if(!p && payload.data && payload.data.cards && payload.data.cards.length) renderCards(payload.data.cards);
+    else if(!p && payload.data && payload.data.p) renderState(payload.data);
+  }
+  // 卡表：单独一个 localStorage 键（约 40KB，只在变化时解析一次）
+  function loadCards(){
+    try{
+      const raw = localStorage.getItem(KEY_CARDS);
+      if(!raw) return;
+      const j = JSON.parse(raw);
+      if(!j || !j.cards || j.at === cardsAt) return;
+      cardsAt = j.at;
+      renderCards(j.cards);
+      log('← 卡牌索引 ' + j.cards.length + ' 张');
+    }catch(e){ log('卡表解析失败：' + e.message); }
+  }
+  function onStorage(e){ if(e && e.key === KEY_ACK){ try{ const p = JSON.parse(localStorage.getItem(KEY_ACK)); if(p && p.id >= 0) onAck(p); }catch(err){} } }
+  window.addEventListener('storage', onStorage);
+  try{ if(ch) ch.onmessage = ev => { const d = ev && ev.data; if(d && d.type === 'ack' && d.payload) onAck(d.payload); }; }catch(e){}
+  // 轮询兜底（同窗口/事件不触发时）
+  let lastSeen = 0;
+  setInterval(()=>{
+    try{
+      const raw = localStorage.getItem(KEY_ACK);
+      if(raw){ const p = JSON.parse(raw); if(p && p.at && p.at !== lastSeen){ lastSeen = p.at; onAck(p); } }
+    }catch(e){}
+    if(Date.now() - lastAckAt > 4000) setConn(false);
+  }, 300);
+
+  /* ---------- 卡牌列表 ---------- */
+  function tagOf(g){ const t = { normal:'正常', derived:'衍生', jm:'JM', veteran:'老兵' }[g] || g; return '<span class="tag ' + g + '">' + t + '</span>'; }
+  function renderCards(list){
+    cards = list || [];
+    const q = ($('#q').value || '').trim().toLowerCase();
+    const grp = $('#grp').value;
+    const box = $('#cards');
+    const shown = cards.filter(c => (grp === 'all' || c.group === grp) && (!q || (c.n || '').toLowerCase().includes(q) || (c.id || '').toLowerCase().includes(q)));
+    if(!shown.length){ box.innerHTML = '<div class="card"><div class="col"><div class="nm">没有匹配的卡</div></div></div>'; return; }
+    box.innerHTML = shown.slice(0, 400).map((c, i) => {
+      const key = c.group + '|' + c.id;
+      const sub = [c.nation || '', c.kind === 'unit' ? '单位' : c.kind === 'counter' ? '反制' : '指令', (c.cost != null ? c.cost + ' 费' : ''), c.t ? c.t : '', (c.a != null ? c.a + '/' + c.h : '')].filter(Boolean).join(' · ');
+      return '<div class="card' + (sel && sel.key === key ? ' sel' : '') + '" data-key="' + key + '"><div class="col"><div class="nm">' + esc(c.n) + ' ' + tagOf(c.group) + '</div><div class="sub">' + esc(sub) + '</div></div></div>';
+    }).join('');
+    box.querySelectorAll('.card').forEach(el => el.onclick = () => {
+      const key = el.dataset.key;
+      sel = cards.find(c => (c.group + '|' + c.id) === key) || null;
+      sel = sel ? Object.assign({}, sel, { key:key }) : null;
+      renderCards(cards);
+      $('#selInfo').textContent = sel ? ('已选：' + sel.n + '（' + sel.group + '）') : '未选择卡牌';
+      ['#btnHand', '#btnBoard', '#btnDeck'].forEach(s => { $(s).disabled = !sel; });
+      $('#btnBoard').disabled = !sel || sel.kind !== 'unit';
+    });
+  }
+  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, m => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[m])); }
+  function renderState(st){
+    $('#turn').textContent = '回合 ' + st.turn + ' · ' + st.phase + (st.over ? ' · 已结束' : '');
+    $('#hpP').textContent = '我方 ' + st.p.hp + '/' + st.p.maxHp;
+    $('#hpA').textContent = '敌方 ' + st.a.hp + '/' + st.a.maxHp + (st.bossKind ? '（' + st.bossKind + ' 第' + st.bossLife + '条命）' : '');
+    $('#kr').textContent = '指挥点 ' + st.p.kredit + '/' + st.p.slots;
+    const fl = [];
+    if(st.dev.infiniteKredit) fl.push('无限点');
+    if(st.dev.hqImmuneSide) fl.push('免疫:' + (st.dev.hqImmuneSide === 'p' ? '我方' : '敌方'));
+    if(st.dev.skipAiTurns) fl.push('跳过AI');
+    $('#flagsPill').textContent = '开关 ' + (fl.length ? fl.join(' / ') : '全关');
+  }
+
+  /* ---------- 交互 ---------- */
+  // 搜索防抖：连打键盘时不要每敲一下就重建 400 行 DOM（旧版这是「卡」的主要来源）
+  let qTimer = null;
+  $('#btnRefresh').onclick = () => { send('ping'); send('state'); send('list', null, null, true); loadCards(); };
+  $('#q').oninput = () => { if(qTimer) clearTimeout(qTimer); qTimer = setTimeout(()=>renderCards(cards), 200); };
+  $('#grp').onchange = () => renderCards(cards);
+  $('#btnHand').onclick = () => sel && send('addHand', { id:sel.id, group:sel.group });
+  $('#btnBoard').onclick = () => sel && send('addBoard', { id:sel.id, group:sel.group });
+  $('#btnDeck').onclick = () => sel && send('addDeck', { id:sel.id, group:sel.group });
+  function pushFlags(){
+    const kr = $('#cbKredit').checked;
+    const ip = $('#cbImmuneP').checked, ia = $('#cbImmuneA').checked;
+    const side = ip ? 'p' : (ia ? 'a' : null);
+    send('flags', { infiniteKredit:kr, hqImmuneSide:side });
+  }
+  $('#cbKredit').onchange = pushFlags; $('#cbImmuneP').onchange = pushFlags; $('#cbImmuneA').onchange = pushFlags;
+  $('#btnSkipAi').onclick = () => send('skipAi');
+  $('#btnHeal').onclick = () => send('heal');
+  $('#btnWin').onclick = () => { if(confirm('直接判玩家获胜？Boss 剩余命数会被跳过。')) send('win'); };
+
+  // 自动重连：每 3 秒 ping 一次（静默，不写日志），每 2.5 秒刷一次局面；卡表只在变化时读
+  setInterval(()=>{ send('ping', null, null, true); }, 3000);
+  setInterval(()=>{ send('state', null, null, true); }, 2500);
+  setInterval(()=>{ loadCards(); }, 2000);
+  setTimeout(()=>{ send('ping', null, null, true); send('state', null, null, true); send('list', null, null, true); loadCards(); }, 200);
+  log('面板已就绪。请确认 KADMIN 已经打开（同一个浏览器窗口/标签页即可）。');
+})();
+</script>
+</body>
+</html>
